@@ -3,7 +3,7 @@ package main
 /// `sshreq` is an internal tool used to generate a CSR.
 
 /// Usage:
-/// 	sshreq -f [private_key] -p [public_key] -i [interval]
+/// 	sshreq -f [private_key] -i [interval]
 
 import (
 	"bytes"
@@ -55,7 +55,7 @@ func main() {
 	}
 
 	if *privateKeyPath == "" || *help {
-		fmt.Println("Usage: sshreq -f [private_key] -p [public_key] -i [interval]")
+		fmt.Println("Usage: sshreq -f [private_key] -i [interval]")
 		flags.PrintDefaults()
 		os.Exit(0)
 	}
