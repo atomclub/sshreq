@@ -12,6 +12,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type AuthProvider string
+
+const (
+	Github                  AuthProvider = "github"
+	CaX25519PublicKeyBase64 string       = ""
+)
+
 // Csr represents the certificate signing request.
 type Csr struct {
 	// SSH public key
@@ -20,11 +27,17 @@ type Csr struct {
 	// Certificate valid interval, default "+1d"
 	Interval string `json:"interval"`
 
+	// Third party auth provider, currently only "github" is allowed
+	AuthProvider AuthProvider `json:"auth_provider"`
+
+	// Oauth Token to get user email from AuthProvider
+	Token string `json:"token"`
+
 	// Signature is the csr signed by privateKey, when signing the signature field is omitted.
 	Signature string `json:"signature,omitempty"`
 }
 
-func run(privateKeyPath *string, interval *string) string {
+func generateCsr(privateKeyPath *string, interval *string, token string) string {
 	privateKeyBytes, err := os.ReadFile(*privateKeyPath)
 	slog.Debug("reading private key: ", "path", *privateKeyPath)
 	ExitIf(err)
@@ -33,7 +46,6 @@ func run(privateKeyPath *string, interval *string) string {
 	if err != nil {
 		switch err.(type) {
 		case *ssh.PassphraseMissingError:
-
 			slog.Debug("private key is encrypted, asking passphrase")
 
 			passphrase, err := speakeasy.Ask("enter passphrase: ")
@@ -42,6 +54,7 @@ func run(privateKeyPath *string, interval *string) string {
 			slog.Debug("parsing private key with passphrase: ", "path", *privateKeyPath)
 			signer, err = ssh.ParsePrivateKeyWithPassphrase(privateKeyBytes, []byte(passphrase))
 			ExitIf(err)
+
 		default:
 			ExitIf(err)
 		}
@@ -52,8 +65,10 @@ func run(privateKeyPath *string, interval *string) string {
 	slog.Debug("initialized signer")
 
 	csr := Csr{
-		PublicKey: string(bytes.TrimRight(ssh.MarshalAuthorizedKey(signer.PublicKey()), "\n")),
-		Interval:  *interval,
+		PublicKey:    string(bytes.TrimRight(ssh.MarshalAuthorizedKey(signer.PublicKey()), "\n")),
+		Interval:     *interval,
+		AuthProvider: Github,
+		Token:        token,
 	}
 
 	payload, err := json.Marshal(csr)
