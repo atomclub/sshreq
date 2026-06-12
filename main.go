@@ -15,7 +15,7 @@ import (
 
 func ExitIf(err error) {
 	if err != nil {
-		slog.Error(err.Error())
+		slog.Any("error", err.Error())
 		os.Exit(1)
 	}
 }
