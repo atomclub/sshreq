@@ -19,6 +19,12 @@ const (
 	CaX25519PublicKeyBase64 string       = ""
 )
 
+var caKey []byte
+
+func init() {
+	caKey, _ = base64.StdEncoding.DecodeString("mijzm5m0iiRqc/ghWyQ4qfkJ3dE02dy6im7J01+Z0zQ=")
+}
+
 // Csr represents the certificate signing request.
 type Csr struct {
 	// SSH public key
@@ -30,8 +36,11 @@ type Csr struct {
 	// Third party auth provider, currently only "github" is allowed
 	AuthProvider AuthProvider `json:"auth_provider"`
 
-	// Oauth Token to get user email from AuthProvider
-	Token string `json:"token"`
+	// Oauth EncryptedToken to get user email from AuthProvider
+	EncryptedToken string `json:"encrypted_token"`
+
+	// ephemeralKey is an ephemeral curve25519 public key.
+	EphemeralKey string `json:"ephemeral_key"`
 
 	// Signature is the csr signed by privateKey, when signing the signature field is omitted.
 	Signature string `json:"signature,omitempty"`
@@ -64,11 +73,14 @@ func generateCsr(privateKeyPath *string, interval *string, token string) string 
 	}
 	slog.Debug("initialized signer")
 
+	ourKey, encryptedToken, err := Encrypt(caKey, []byte(token))
+
 	csr := Csr{
-		PublicKey:    string(bytes.TrimRight(ssh.MarshalAuthorizedKey(signer.PublicKey()), "\n")),
-		Interval:     *interval,
-		AuthProvider: Github,
-		Token:        token,
+		PublicKey:      string(bytes.TrimRight(ssh.MarshalAuthorizedKey(signer.PublicKey()), "\n")),
+		Interval:       *interval,
+		AuthProvider:   Github,
+		EphemeralKey:   base64.StdEncoding.EncodeToString(ourKey),
+		EncryptedToken: base64.StdEncoding.EncodeToString(encryptedToken),
 	}
 
 	payload, err := json.Marshal(csr)
