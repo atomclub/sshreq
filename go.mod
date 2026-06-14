@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/bgentry/speakeasy v0.2.0
+	github.com/carlmjohnson/requests v0.25.1
 	github.com/cli/browser v1.0.0
 	github.com/cli/oauth v1.2.2
 	github.com/spf13/pflag v1.0.10
@@ -22,6 +23,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )

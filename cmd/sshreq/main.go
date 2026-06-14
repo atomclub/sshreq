@@ -6,33 +6,29 @@ package main
 // 	sshreq -f [private_key] -i [interval]
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 
+	"github.com/atomclub/sshreq"
+
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
-
-func ExitIf(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s", err.Error())
-		os.Exit(1)
-	}
-}
 
 func main() {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 
 	userConfigDir, err := os.UserConfigDir()
-	ExitIf(err)
+	sshreq.ExitIf(err)
 	configPath := filepath.Join(userConfigDir, "sshreq")
 
 	if _, err := os.ReadDir(configPath); os.IsNotExist(err) {
 		err = os.Mkdir(configPath, 0755)
-		ExitIf(err)
+		sshreq.ExitIf(err)
 	}
 
 	viper.AddConfigPath(configPath)
@@ -48,7 +44,7 @@ func main() {
 		Name:      "token",
 		Shorthand: "t",
 		Usage:     "github login refreshToken",
-		Value:     newStringValue("", new(string)),
+		Value:     sshreq.NewStringValue("", new(string)),
 		DefValue:  "",
 	}
 	flagSet.AddFlag(refreshTokenFlag)
@@ -56,11 +52,11 @@ func main() {
 
 	flagSet.SortFlags = false
 	err = flagSet.Parse(os.Args)
-	ExitIf(err)
+	sshreq.ExitIf(err)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			ExitIf(err)
+			sshreq.ExitIf(err)
 		}
 	}
 
@@ -78,14 +74,20 @@ func main() {
 	var token string
 	token = viper.GetString("token")
 	if token == "" {
-		token, err = requestLogin()
-		ExitIf(err)
+		token, err = sshreq.RequestLogin()
+		sshreq.ExitIf(err)
 	}
 
 	viper.Set("token", token)
-	if viper.WriteConfig() != nil {
-		panic(err)
+	if err := viper.WriteConfig(); err != nil {
+		panic(err.Error())
 	}
 
-	fmt.Println(generateCsr(privateKeyPath, interval, viper.GetString("token")))
+	csr := sshreq.GenerateCsr(privateKeyPath, interval, viper.GetString("token"))
+	csrString, err := json.Marshal(csr)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println(string(csrString))
 }

@@ -1,10 +1,10 @@
-package main
+package sshreq
 
 // I don't know why pflag doesn't export something like NewStringValue
 // Copy it here
 type stringValue string
 
-func newStringValue(val string, p *string) *stringValue {
+func NewStringValue(val string, p *string) *stringValue {
 	*p = val
 	return (*stringValue)(p)
 }

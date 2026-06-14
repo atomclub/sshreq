@@ -1,14 +1,17 @@
-package main
+package sshreq
 
 import (
-	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/bgentry/speakeasy"
+	"github.com/carlmjohnson/requests"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -16,19 +19,26 @@ type AuthProvider string
 
 const (
 	Github                  AuthProvider = "github"
-	CaX25519PublicKeyBase64 string       = ""
+	CaX25519PublicKeyBase64 string       = "gHY8cIG8VN04BRnBFineCxnjM03e77ZDtShEY85/iV0="
 )
 
 var caKey []byte
 
+func ExitIf(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err.Error())
+		os.Exit(1)
+	}
+}
+
 func init() {
-	caKey, _ = base64.StdEncoding.DecodeString("mijzm5m0iiRqc/ghWyQ4qfkJ3dE02dy6im7J01+Z0zQ=")
+	caKey, _ = base64.StdEncoding.DecodeString(CaX25519PublicKeyBase64)
 }
 
 // Csr represents the certificate signing request.
 type Csr struct {
 	// SSH public key
-	PublicKey string `json:"publicKey"`
+	PublicKey Bytes `json:"publicKey"`
 
 	// Certificate valid interval, default "+1d"
 	Interval string `json:"interval"`
@@ -37,16 +47,20 @@ type Csr struct {
 	AuthProvider AuthProvider `json:"auth_provider"`
 
 	// Oauth EncryptedToken to get user email from AuthProvider
-	EncryptedToken string `json:"encrypted_token"`
+	EncryptedToken Bytes `json:"encrypted_token"`
 
 	// ephemeralKey is an ephemeral curve25519 public key.
-	EphemeralKey string `json:"ephemeral_key"`
+	EphemeralKey Bytes `json:"ephemeral_key"`
 
 	// Signature is the csr signed by privateKey, when signing the signature field is omitted.
-	Signature string `json:"signature,omitempty"`
+	Signature Bytes `json:"signature,omitempty"`
 }
 
-func generateCsr(privateKeyPath *string, interval *string, token string) string {
+func (c *Csr) MarshalJSON() ([]byte, error) {
+	return json.Marshal(*c)
+}
+
+func GenerateCsr(privateKeyPath *string, interval *string, token string) *Csr {
 	privateKeyBytes, err := os.ReadFile(*privateKeyPath)
 	slog.Debug("reading private key: ", "path", *privateKeyPath)
 	ExitIf(err)
@@ -73,28 +87,90 @@ func generateCsr(privateKeyPath *string, interval *string, token string) string 
 	}
 	slog.Debug("initialized signer")
 
+	slog.Debug("encrypt to ", "ca", Bytes(caKey).String())
 	ourKey, encryptedToken, err := Encrypt(caKey, []byte(token))
+	ExitIf(err)
 
-	csr := Csr{
-		PublicKey:      string(bytes.TrimRight(ssh.MarshalAuthorizedKey(signer.PublicKey()), "\n")),
+	csr := &Csr{
+		PublicKey:      signer.PublicKey().Marshal(),
 		Interval:       *interval,
 		AuthProvider:   Github,
-		EphemeralKey:   base64.StdEncoding.EncodeToString(ourKey),
-		EncryptedToken: base64.StdEncoding.EncodeToString(encryptedToken),
+		EphemeralKey:   ourKey,
+		EncryptedToken: encryptedToken,
 	}
 
 	payload, err := json.Marshal(csr)
 	ExitIf(err)
-	slog.Debug("generated payload", "payload", string(payload))
+	slog.Debug("generated payload")
 
 	signature, err := signer.Sign(rand.Reader, payload)
 	ExitIf(err)
 
-	sig := base64.StdEncoding.EncodeToString(signature.Blob)
-	slog.Debug("generated signature", "signature", sig)
-	csr.Signature = sig
+	slog.Debug("generated signature")
+	csr.Signature = ssh.Marshal(signature)
+	return csr
+}
 
-	rawCsr, err := json.Marshal(csr)
-	ExitIf(err)
-	return string(rawCsr)
+func (c *Csr) VerifySignature() (err error) {
+	publicKey, err := ssh.ParsePublicKey(c.PublicKey)
+	if err != nil {
+		slog.Debug("parse public key failed", "publickey", c.PublicKey)
+		return
+	}
+
+	newCsr := &Csr{
+		PublicKey:      c.PublicKey,
+		Interval:       c.Interval,
+		AuthProvider:   c.AuthProvider,
+		EncryptedToken: c.EncryptedToken,
+		EphemeralKey:   c.EphemeralKey,
+	}
+
+	csrWithoutSignature, err := json.Marshal(newCsr)
+	slog.Debug("created json without signature field", "payload", string(csrWithoutSignature))
+	if err != nil {
+		return
+	}
+
+	sig := &ssh.Signature{}
+	err = ssh.Unmarshal(c.Signature, sig)
+	if err != nil {
+		slog.Debug("ssh unmarshal failed")
+		return
+	}
+	err = publicKey.Verify(csrWithoutSignature, sig)
+	return
+}
+
+func (c *Csr) decryptToken(ourKey []byte) (token string, err error) {
+	tokenBytes, err := Decrypt(ourKey, c.EphemeralKey, c.EncryptedToken)
+	// ourKey, encryptedToken, err := Encrypt(caKey, []byte(token))
+	// ExitIf(err)
+	token = string(tokenBytes)
+	return
+}
+
+type GithubResp struct {
+	TwoFactorAuthentication bool `json:"two_factor_authentication"`
+}
+
+func (c *Csr) VerifyToken(ourKey []byte) (err error) {
+	token, err := c.decryptToken(ourKey)
+	if err != nil {
+		return
+	}
+
+	if c.AuthProvider != Github {
+		return errors.New("unsupported provider: " + string(c.AuthProvider))
+	}
+	resp := GithubResp{}
+	err = requests.URL("https://api.github.com").
+		Path("/user").
+		Header("Accept", "application/vnd.github+json").
+		Header("X-GitHub-Api-Version", "2026-03-10").
+		Header("Authorization", "Bearer "+token).
+		ToJSON(&resp).
+		Fetch(context.Background())
+
+	return
 }

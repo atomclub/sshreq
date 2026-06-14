@@ -1,4 +1,4 @@
-package main
+package sshreq
 
 import (
 	"context"
@@ -10,15 +10,15 @@ import (
 )
 
 // Initiate the OAuth App Authorization Flow for GitHub.com.
-func requestLogin() (string, error) {
+func RequestLogin() (string, error) {
 	flow, err := webapp.InitFlow()
 	if err != nil {
 		return "", err
 	}
 
 	params := webapp.BrowserParams{
-		ClientID:    clientID,
-		RedirectURI: callbackURL,
+		ClientID:    ClientID,
+		RedirectURI: CallbackURL,
 		Scopes:      []string{"user"},
 		AllowSignup: false,
 	}
@@ -40,7 +40,7 @@ func requestLogin() (string, error) {
 
 	httpClient := http.DefaultClient
 	accessToken, err := flow.Wait(context.TODO(), httpClient, "https://github.com/login/oauth/access_token", webapp.WaitOptions{
-		ClientSecret: clientSecret,
+		ClientSecret: ClientSecret,
 	})
 	if err != nil {
 		return "", err
