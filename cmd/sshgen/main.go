@@ -67,7 +67,7 @@ func main() {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
-	if caKey.Value.String() == "" || *help {
+	if viper.GetString("ca-key") == "" || *help {
 		fmt.Println("Usage: `sshgen -k [ca_private_key] [-y]`")
 		flagSet.PrintDefaults()
 		os.Exit(0)
