@@ -23,24 +23,24 @@ func aeadEncrypt(key, plaintext []byte) ([]byte, error) {
 	return aead.Seal(nil, nonce, plaintext, nil), nil
 }
 
-func Encrypt(theirKey, payload []byte) (ourKey, cipherText []byte, err error) {
-	ephemeralKey := make([]byte, curve25519.ScalarSize)
-	rand.Read(ephemeralKey)
-	ourKey, err = curve25519.X25519(ephemeralKey, curve25519.Basepoint)
-	slog.Debug("get ephemeralKey", "private", Bytes(ephemeralKey).String(), "public", Bytes(ourKey).String())
+func Encrypt(X25519CaKey, payload []byte) (X25519UserKey, cipherText []byte, err error) {
+	X25519UserPrivateKey := make([]byte, curve25519.ScalarSize)
+	rand.Read(X25519UserPrivateKey)
+	X25519UserKey, err = curve25519.X25519(X25519UserPrivateKey, curve25519.Basepoint)
+	slog.Debug("get ephemeralKey", "private", Bytes(X25519UserPrivateKey).String(), "public", Bytes(X25519UserKey).String())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sharedKey, err := curve25519.X25519(ephemeralKey, theirKey)
+	sharedKey, err := curve25519.X25519(X25519UserPrivateKey, X25519CaKey)
 	slog.Debug("computed sharedKey", "key", Bytes(sharedKey).String())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	salt := make([]byte, 0, len(ourKey)+len(theirKey))
-	salt = append(salt, ourKey...)
-	salt = append(salt, theirKey...)
+	salt := make([]byte, 0, len(X25519UserKey)+len(X25519CaKey))
+	salt = append(salt, X25519UserKey...)
+	salt = append(salt, X25519CaKey...)
 	slog.Debug("get salt", "salt", Bytes(salt).String())
 
 	h := hkdf.New(sha256.New, sharedKey, salt, []byte("X25519"))
@@ -61,23 +61,23 @@ func aeadDecrypt(key []byte, ciphertext []byte) ([]byte, error) {
 	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
-func Decrypt(ourKey, theirKey, cipher []byte) (payload []byte, err error) {
-	sharedKey, err := curve25519.X25519(ourKey, theirKey)
+func Decrypt(X25519CaPrivateKey, X25519UserKey, cipher []byte) (payload []byte, err error) {
+	sharedKey, err := curve25519.X25519(X25519CaPrivateKey, X25519UserKey)
 	slog.Debug("computed sharedKey", "key", Bytes(sharedKey).String())
 	if err != nil {
 		return nil, err
 	}
 
-	pub, err := curve25519.X25519(ourKey, curve25519.Basepoint)
-	slog.Debug("computed pub", "key", Bytes(pub).String())
+	X25519CaKey, err := curve25519.X25519(X25519CaPrivateKey, curve25519.Basepoint)
+	slog.Debug("computed pub", "key", Bytes(X25519CaKey).String())
 	if err != nil {
 		return nil, err
 	}
 
-	salt := make([]byte, 0, len(ourKey)+len(theirKey))
+	salt := make([]byte, 0, len(X25519CaPrivateKey)+len(X25519UserKey))
 	// revert the order
-	salt = append(salt, theirKey...)
-	salt = append(salt, pub...)
+	salt = append(salt, X25519UserKey...)
+	salt = append(salt, X25519CaKey...)
 	slog.Debug("get salt", "salt", Bytes(salt).String())
 
 	h := hkdf.New(sha256.New, sharedKey, salt, []byte("X25519"))

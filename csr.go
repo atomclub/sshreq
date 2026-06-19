@@ -22,7 +22,7 @@ const (
 	CaX25519PublicKeyBase64 string       = "gHY8cIG8VN04BRnBFineCxnjM03e77ZDtShEY85/iV0="
 )
 
-var caKey []byte
+var X25519CaKey []byte
 
 func ExitIf(err error) {
 	if err != nil {
@@ -32,7 +32,7 @@ func ExitIf(err error) {
 }
 
 func init() {
-	caKey, _ = base64.StdEncoding.DecodeString(CaX25519PublicKeyBase64)
+	X25519CaKey, _ = base64.StdEncoding.DecodeString(CaX25519PublicKeyBase64)
 }
 
 // Csr represents the certificate signing request.
@@ -60,7 +60,7 @@ func (c *Csr) MarshalJSON() ([]byte, error) {
 	return json.Marshal(*c)
 }
 
-func GenerateCsr(privateKeyPath *string, interval *string, token string) *Csr {
+func GetSigner(privateKeyPath *string) ssh.Signer {
 	privateKeyBytes, err := os.ReadFile(*privateKeyPath)
 	slog.Debug("reading private key: ", "path", *privateKeyPath)
 	ExitIf(err)
@@ -86,16 +86,21 @@ func GenerateCsr(privateKeyPath *string, interval *string, token string) *Csr {
 		panic("signer is nil!")
 	}
 	slog.Debug("initialized signer")
+	return signer
+}
 
-	slog.Debug("encrypt to ", "ca", Bytes(caKey).String())
-	ourKey, encryptedToken, err := Encrypt(caKey, []byte(token))
+func GenerateCsr(privateKeyPath *string, interval *string, token string) *Csr {
+	signer := GetSigner(privateKeyPath)
+
+	slog.Debug("encrypt to ", "ca", Bytes(X25519CaKey).String())
+	X25519UserKey, encryptedToken, err := Encrypt(X25519CaKey, []byte(token))
 	ExitIf(err)
 
 	csr := &Csr{
 		PublicKey:      signer.PublicKey().Marshal(),
 		Interval:       *interval,
 		AuthProvider:   Github,
-		EphemeralKey:   ourKey,
+		EphemeralKey:   X25519UserKey,
 		EncryptedToken: encryptedToken,
 	}
 
@@ -142,10 +147,8 @@ func (c *Csr) VerifySignature() (err error) {
 	return
 }
 
-func (c *Csr) decryptToken(ourKey []byte) (token string, err error) {
-	tokenBytes, err := Decrypt(ourKey, c.EphemeralKey, c.EncryptedToken)
-	// ourKey, encryptedToken, err := Encrypt(caKey, []byte(token))
-	// ExitIf(err)
+func (c *Csr) decryptToken(X25519CaPrivateKey []byte) (token string, err error) {
+	tokenBytes, err := Decrypt(X25519CaPrivateKey, c.EphemeralKey, c.EncryptedToken)
 	token = string(tokenBytes)
 	return
 }
@@ -154,8 +157,8 @@ type GithubResp struct {
 	TwoFactorAuthentication bool `json:"two_factor_authentication"`
 }
 
-func (c *Csr) VerifyToken(ourKey []byte) (err error) {
-	token, err := c.decryptToken(ourKey)
+func (c *Csr) VerifyToken(X25519CaPrivateKey []byte) (err error) {
+	token, err := c.decryptToken(X25519CaPrivateKey)
 	if err != nil {
 		return
 	}

@@ -6,6 +6,7 @@ package main
 // 	sshreq -f [private_key] -i [interval]
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,12 +14,20 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/atomclub/sshreq"
+	"golang.org/x/crypto/ssh"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
+
+func fatalIf(msg string, err error) {
+	if err != nil {
+		log.Fatalf("%s failed: %s", msg, err.Error())
+	}
+}
 
 func main() {
 	viper.SetConfigName("configca")
@@ -29,8 +38,8 @@ func main() {
 	configPath := filepath.Join(userConfigDir, "sshreq")
 
 	if _, err := os.ReadDir(configPath); os.IsNotExist(err) {
-		err = os.Mkdir(configPath, 0755)
-		sshreq.ExitIf(err)
+		err = os.Mkdir(configPath, 0o755)
+		fatalIf("get config dir", err)
 	}
 
 	viper.AddConfigPath(configPath)
@@ -41,10 +50,12 @@ func main() {
 	help := flagSet.BoolP("help", "h", false, "show help message")
 	_ = flagSet.BoolP("confirm", "y", false, "silently confirm")
 
+	sshCaKeyPath := flagSet.StringP("ssh-ca-key", "s", "", "ssh ca private key path")
+
 	caKey := &flag.Flag{
 		Name:      "ca-key",
 		Shorthand: "k",
-		Usage:     "ssh ca private key",
+		Usage:     "X25519 ca private key",
 		Value:     sshreq.NewStringValue("", new(string)),
 		DefValue:  "",
 	}
@@ -53,54 +64,85 @@ func main() {
 
 	flagSet.SortFlags = false
 	err = flagSet.Parse(os.Args)
-	sshreq.ExitIf(err)
+	fatalIf("parsing flag", err)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			// it's not simply NotFound
-			sshreq.ExitIf(err)
+			fatalIf("reading config", err)
 		}
 	}
 
-	slog.SetLogLoggerLevel(slog.LevelInfo)
 	if *verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
+	} else {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
 	}
 
-	if viper.GetString("ca-key") == "" || *help {
-		fmt.Println("Usage: `sshgen -k [ca_private_key] [-y]`")
+	if viper.GetString("ca-key") == "" || *help || *sshCaKeyPath == "" {
+		fmt.Println("Usage: `sshgen -k [ca-private-key] [-y] -s [ssh-ca-private-key-path]`")
 		flagSet.PrintDefaults()
 		os.Exit(0)
 	}
 
-	ourKey, err := base64.StdEncoding.DecodeString(viper.GetString("ca-key"))
-	slog.Debug("got ourKey", "key", sshreq.Bytes(ourKey).String())
-	if err != nil {
-		log.Fatal("ca-key decode failed: ", err.Error())
-	}
+	X25519CAPrivateKey, err := base64.StdEncoding.DecodeString(viper.GetString("ca-key"))
+	slog.Debug("got X25519CAPrivateKey", "key", sshreq.Bytes(X25519CAPrivateKey).String())
+	fatalIf("ca-key (x25519) decode", err)
 
 	if err := viper.WriteConfigAs("configca.yaml"); err != nil {
 		panic(err)
 	}
 
+	signer := sshreq.GetSigner(sshCaKeyPath)
+
 	csr := &sshreq.Csr{}
 	var csrString []byte
-	fmt.Scan(&csrString)
+	fmt.Print("Paste csr json here: ")
+	_, err = fmt.Scan(&csrString)
+	fatalIf("get input", err)
+
 	err = json.Unmarshal(csrString, csr)
-	sshreq.ExitIf(err)
+	fatalIf("parsing csr", err)
 
 	err = csr.VerifySignature()
-	if err != nil {
-		log.Fatalf("verify signature failed: %s", err.Error())
-		return
-	}
+	fatalIf("verifying signature", err)
 
-	err = csr.VerifyToken(ourKey)
-	slog.Debug("verifing with", "privkey", sshreq.Bytes(ourKey).String())
-	if err != nil {
-		log.Fatalf("verify token failed: %s", err.Error())
-		return
-	}
+	slog.Debug("verifing with", "X25519PrivateKey", sshreq.Bytes(X25519CAPrivateKey).String())
+	err = csr.VerifyToken(X25519CAPrivateKey)
+	fatalIf("verifying token", err)
 
 	fmt.Println("verified!")
+	SSHUserKey, err := ssh.ParsePublicKey(csr.PublicKey)
+	fatalIf("parsing public key", err)
+
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		log.Fatalf("read nonce failed: %s", err.Error())
+	}
+
+	cert := &ssh.Certificate{
+		Key:             SSHUserKey,
+		Nonce:           nonce,
+		CertType:        ssh.UserCert,
+		Serial:          0,
+		ValidPrincipals: []string{"atom", "picasol", "root"},
+		// TODO: parse valid period in csr
+		ValidAfter:  uint64(time.Now().UTC().Unix()),
+		ValidBefore: uint64(time.Now().UTC().Add(24 * time.Hour).Unix()),
+		Permissions: ssh.Permissions{},
+	}
+	err = cert.SignCert(rand.Reader, signer)
+	fatalIf("signing cert", err)
+
+	fmt.Println(marshalOpenSSHCert(cert))
+}
+
+func marshalOpenSSHCert(cert *ssh.Certificate) string {
+	wireBytes := cert.Marshal()
+
+	certType := cert.Type()
+	base64Str := base64.StdEncoding.EncodeToString(wireBytes)
+	comment := ""
+
+	return fmt.Sprintf("%s %s %s", certType, base64Str, comment)
 }
