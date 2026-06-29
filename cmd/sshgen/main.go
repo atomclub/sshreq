@@ -9,7 +9,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"log/slog"
 	"os"
@@ -34,21 +36,17 @@ func fatalIf(msg string, err error) {
 }
 
 func main() {
-	viper.SetConfigName("configca")
-	viper.SetConfigType("yaml")
-
 	userConfigDir, err := os.UserConfigDir()
 	fatalIf("parse user config", err)
 
-	configPath := filepath.Join(userConfigDir, "sshreq")
-
-	if _, err := os.ReadDir(configPath); os.IsNotExist(err) {
-		err = os.Mkdir(configPath, 0o755)
+	configDir := filepath.Join(userConfigDir, "sshreq")
+	if _, err := os.ReadDir(configDir); os.IsNotExist(err) {
+		err = os.Mkdir(configDir, 0o755)
 		fatalIf("get config dir", err)
 	}
 
-	viper.AddConfigPath(configPath)
-	viper.AddConfigPath(".")
+	configPath := filepath.Join(userConfigDir, "sshgen.yaml")
+	viper.SetConfigFile(configPath)
 
 	flagSet := flag.CommandLine
 	verbose := flagSet.BoolP("verbose", "v", false, "show debug message")
@@ -80,9 +78,11 @@ func main() {
 	fatalIf("parsing flag", err)
 
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			// it's not simply NotFound
-			fatalIf("reading config", err)
+		if !errors.Is(err, fs.ErrNotExist) {
+			fatalIf("reading viper config", err)
+		} else {
+			_, _ = os.Create(configPath)
+			viper.ReadInConfig()
 		}
 	}
 
@@ -104,9 +104,7 @@ func main() {
 	slog.Debug("got X25519CAPrivateKey", "key", Bytes(X25519CAPrivateKey).String())
 	fatalIf("ca-key (x25519) decode", err)
 
-	if err := viper.WriteConfigAs("configca.yaml"); err != nil {
-		panic(err)
-	}
+	fatalIf("write config", viper.WriteConfig())
 
 	signer := sshreq.GetSigner(sshCaKeyPath)
 

@@ -3,7 +3,6 @@ package sshreq
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,21 +19,14 @@ import (
 type AuthProvider string
 
 const (
-	Github                  AuthProvider = "github"
-	CaX25519PublicKeyBase64 string       = "gHY8cIG8VN04BRnBFineCxnjM03e77ZDtShEY85/iV0="
+	Github AuthProvider = "github"
 )
-
-var X25519CaKey []byte
 
 func fatalIf(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err.Error())
 		os.Exit(1)
 	}
-}
-
-func init() {
-	X25519CaKey, _ = base64.StdEncoding.DecodeString(CaX25519PublicKeyBase64)
 }
 
 // Csr represents the certificate signing request.
@@ -91,7 +83,7 @@ func GetSigner(privateKeyPath string) ssh.Signer {
 	return signer
 }
 
-func NewCsr(privateKeyPath string, interval *string, token string) *Csr {
+func NewCsr(privateKeyPath string, interval *string, token string, X25519CaKey []byte) *Csr {
 	signer := GetSigner(privateKeyPath)
 
 	slog.Debug("encrypt to ", "ca", Bytes(X25519CaKey).String())

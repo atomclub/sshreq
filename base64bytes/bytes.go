@@ -1,4 +1,4 @@
-package sshreq
+package base64bytes
 
 import (
 	"bytes"
@@ -9,6 +9,14 @@ import (
 type Bytes []byte
 
 var _ json.Marshaler = Bytes(nil)
+
+func NewBytes(s string) Bytes {
+	bytes, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+	return bytes
+}
 
 func (b Bytes) MarshalJSON() ([]byte, error) {
 	buf := &bytes.Buffer{}
