@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,17 +19,23 @@ import (
 	"github.com/spf13/viper"
 )
 
+func fatalIf(msg string, err error) {
+	if err != nil {
+		log.Fatalf("%s failed: %s", msg, err.Error())
+	}
+}
+
 func main() {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 
 	userConfigDir, err := os.UserConfigDir()
-	sshreq.ExitIf(err)
-	configPath := filepath.Join(userConfigDir, "sshreq")
+	fatalIf("get config dir", err)
 
+	configPath := filepath.Join(userConfigDir, "sshreq")
 	if _, err := os.ReadDir(configPath); os.IsNotExist(err) {
-		err = os.Mkdir(configPath, 0755)
-		sshreq.ExitIf(err)
+		err = os.Mkdir(configPath, 0o755)
+		fatalIf("creating config dir", err)
 	}
 
 	viper.AddConfigPath(configPath)
@@ -52,17 +59,18 @@ func main() {
 
 	flagSet.SortFlags = false
 	err = flagSet.Parse(os.Args)
-	sshreq.ExitIf(err)
+	fatalIf("parsing flag", err)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			sshreq.ExitIf(err)
+			fatalIf("reading viper config", err)
 		}
 	}
 
-	slog.SetLogLoggerLevel(slog.LevelInfo)
 	if *verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
+	} else {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
 	}
 
 	if *privateKeyPath == "" || *help {
@@ -75,19 +83,15 @@ func main() {
 	token = viper.GetString("token")
 	if token == "" {
 		token, err = sshreq.RequestLogin()
-		sshreq.ExitIf(err)
+		fatalIf("require login to get token", err)
 	}
 
 	viper.Set("token", token)
-	if err := viper.WriteConfig(); err != nil {
-		panic(err.Error())
-	}
+	fatalIf("write config", viper.WriteConfig())
 
-	csr := sshreq.GenerateCsr(privateKeyPath, interval, viper.GetString("token"))
+	csr := sshreq.NewCsr(*privateKeyPath, interval, viper.GetString("token"))
 	csrString, err := json.Marshal(csr)
-	if err != nil {
-		panic(err.Error())
-	}
+	fatalIf("marshaling json output", err)
 
 	fmt.Println(string(csrString))
 }

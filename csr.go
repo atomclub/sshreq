@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"os"
 
+	. "github.com/atomclub/sshreq/base64bytes"
+	"github.com/atomclub/sshreq/crypto"
 	"github.com/bgentry/speakeasy"
 	"github.com/carlmjohnson/requests"
 	"golang.org/x/crypto/ssh"
@@ -24,7 +26,7 @@ const (
 
 var X25519CaKey []byte
 
-func ExitIf(err error) {
+func fatalIf(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s", err.Error())
 		os.Exit(1)
@@ -60,10 +62,10 @@ func (c *Csr) MarshalJSON() ([]byte, error) {
 	return json.Marshal(*c)
 }
 
-func GetSigner(privateKeyPath *string) ssh.Signer {
-	privateKeyBytes, err := os.ReadFile(*privateKeyPath)
-	slog.Debug("reading private key: ", "path", *privateKeyPath)
-	ExitIf(err)
+func GetSigner(privateKeyPath string) ssh.Signer {
+	privateKeyBytes, err := os.ReadFile(privateKeyPath)
+	slog.Debug("reading private key: ", "path", privateKeyPath)
+	fatalIf(err)
 
 	signer, err := ssh.ParsePrivateKey(privateKeyBytes)
 	if err != nil {
@@ -72,14 +74,14 @@ func GetSigner(privateKeyPath *string) ssh.Signer {
 			slog.Debug("private key is encrypted, asking passphrase")
 
 			passphrase, err := speakeasy.Ask("enter passphrase: ")
-			ExitIf(err)
+			fatalIf(err)
 
-			slog.Debug("parsing private key with passphrase: ", "path", *privateKeyPath)
+			slog.Debug("parsing private key with passphrase: ", "path", privateKeyPath)
 			signer, err = ssh.ParsePrivateKeyWithPassphrase(privateKeyBytes, []byte(passphrase))
-			ExitIf(err)
+			fatalIf(err)
 
 		default:
-			ExitIf(err)
+			fatalIf(err)
 		}
 	}
 	if signer == nil {
@@ -89,27 +91,27 @@ func GetSigner(privateKeyPath *string) ssh.Signer {
 	return signer
 }
 
-func GenerateCsr(privateKeyPath *string, interval *string, token string) *Csr {
+func NewCsr(privateKeyPath string, interval *string, token string) *Csr {
 	signer := GetSigner(privateKeyPath)
 
 	slog.Debug("encrypt to ", "ca", Bytes(X25519CaKey).String())
-	X25519UserKey, encryptedToken, err := Encrypt(X25519CaKey, []byte(token))
-	ExitIf(err)
+	SenderPublicKey, encryptedToken, err := crypto.EphemeralEncrypt(X25519CaKey, []byte(token))
+	fatalIf(err)
 
 	csr := &Csr{
 		PublicKey:      signer.PublicKey().Marshal(),
 		Interval:       *interval,
 		AuthProvider:   Github,
-		EphemeralKey:   X25519UserKey,
+		EphemeralKey:   SenderPublicKey,
 		EncryptedToken: encryptedToken,
 	}
 
 	payload, err := json.Marshal(csr)
-	ExitIf(err)
+	fatalIf(err)
 	slog.Debug("generated payload")
 
 	signature, err := signer.Sign(rand.Reader, payload)
-	ExitIf(err)
+	fatalIf(err)
 
 	slog.Debug("generated signature")
 	csr.Signature = ssh.Marshal(signature)
@@ -148,13 +150,18 @@ func (c *Csr) VerifySignature() (err error) {
 }
 
 func (c *Csr) decryptToken(X25519CaPrivateKey []byte) (token string, err error) {
-	tokenBytes, err := Decrypt(X25519CaPrivateKey, c.EphemeralKey, c.EncryptedToken)
+	tokenBytes, err := crypto.Decrypt(
+		crypto.NewKeypairWithKey(X25519CaPrivateKey),
+		c.EphemeralKey,
+		c.EncryptedToken,
+	)
+
 	token = string(tokenBytes)
 	return
 }
 
 type GithubResp struct {
-	TwoFactorAuthentication bool `json:"two_factor_authentication"`
+	TwoFactorAuthentication bool `json:"two_factor_authentication"` // present in resp when the token belongs to the user.
 }
 
 func (c *Csr) VerifyToken(X25519CaPrivateKey []byte) (err error) {
