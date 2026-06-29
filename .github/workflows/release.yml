@@ -1,0 +1,28 @@
+name: SLSA Go releaser
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions: read-all
+
+jobs:
+  build:
+    permissions:
+      id-token: write # To sign.
+      contents: write # To upload release assets.
+      actions: read   # To read workflow path.
+    strategy:
+      matrix:
+        os:
+          - linux
+          - windows
+          - darwin
+        entry:
+          - sshreq
+          - sshkex
+          - sshgen
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0
+    with:
+      go-version: 1.26.4
+      config-file: .slsa-goreleaser/${{matrix.os}}-amd64-${{matrix.entry}}.yml
