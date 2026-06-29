@@ -161,7 +161,9 @@ func (c *Csr) decryptToken(X25519CaPrivateKey []byte) (token string, err error) 
 }
 
 type GithubResp struct {
-	TwoFactorAuthentication bool `json:"two_factor_authentication"` // present in resp when the token belongs to the user.
+	TwoFactorAuthentication bool   `json:"two_factor_authentication"` // present in resp when the token belongs to the user.
+	Name                    string `json:"name"`
+	URL                     string `json:"html_url"`
 }
 
 func (c *Csr) VerifyToken(X25519CaPrivateKey []byte) (err error) {
@@ -181,6 +183,17 @@ func (c *Csr) VerifyToken(X25519CaPrivateKey []byte) (err error) {
 		Header("Authorization", "Bearer "+token).
 		ToJSON(&resp).
 		Fetch(context.Background())
+	if err != nil {
+		return err
+	}
 
-	return
+	fmt.Printf("user home page: %s\nuser name: %s\n confirm? [Y/n]", resp.URL, resp.Name)
+	var input string
+	_, _ = fmt.Scanf("%s\n", &input)
+
+	if input == "Y" || input == "y" || input == "" {
+		return
+	} else {
+		return errors.New("verification failed")
+	}
 }

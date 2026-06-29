@@ -14,10 +14,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/atomclub/sshreq"
+
 	. "github.com/atomclub/sshreq/base64bytes"
+	"github.com/atomclub/sshreq/duration"
 	"golang.org/x/crypto/ssh"
 
 	flag "github.com/spf13/pflag"
@@ -109,6 +112,7 @@ func main() {
 
 	csr := requestPaste()
 
+	// ensure the generator has the corresponding ssh private key
 	err = csr.VerifySignature()
 	fatalIf("verifying signature", err)
 
@@ -116,9 +120,14 @@ func main() {
 	err = csr.VerifyToken(X25519CAPrivateKey)
 	fatalIf("verifying token", err)
 
-	fmt.Println("verified!")
 	SSHUserKey, err := ssh.ParsePublicKey(csr.PublicKey)
 	fatalIf("parsing public key", err)
+
+	// parse duration like +1m2w12h
+	d := strings.TrimPrefix(csr.Interval, "+")
+	duration, err := duration.ParseDuration(d)
+	fatalIf("parsing duration", err)
+	validBefore := time.Now().Add(time.Duration(duration)).UTC()
 
 	cert := &ssh.Certificate{
 		Key:      SSHUserKey,
@@ -128,7 +137,7 @@ func main() {
 
 		// TODO: parse valid period in csr
 		ValidAfter:  uint64(time.Now().UTC().Unix()),
-		ValidBefore: uint64(time.Now().UTC().Add(30 * 24 * time.Hour).Unix()),
+		ValidBefore: uint64(validBefore.Unix()),
 
 		Permissions: ssh.Permissions{
 			Extensions: map[string]string{
