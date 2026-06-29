@@ -9,4 +9,4 @@ goarch: amd64
 
 main: ./cmd/sshreq
 
-binary: sshreq-{{ .Os }}-{{ .Arch }}
+binary: sshreq-{{ .Os }}-{{ .Arch }}.exe

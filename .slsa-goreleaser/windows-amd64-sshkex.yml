@@ -9,4 +9,4 @@ goarch: amd64
 
 main: ./cmd/sshkex
 
-binary: sshkex-{{ .Os }}-{{ .Arch }}
+binary: sshkex-{{ .Os }}-{{ .Arch }}.exe

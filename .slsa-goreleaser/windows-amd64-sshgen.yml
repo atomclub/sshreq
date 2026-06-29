@@ -9,4 +9,4 @@ goarch: amd64
 
 main: ./cmd/sshgen
 
-binary: sshgen-{{ .Os }}-{{ .Arch }}
+binary: sshgen-{{ .Os }}-{{ .Arch }}.exe
